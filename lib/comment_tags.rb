@@ -1,6 +1,32 @@
 module CommentTags
   include Radiant::Taggable
+  include WillPaginate::ViewHelpers
+  
+  class RadiantLinkRenderer < WillPaginate::LinkRenderer
+    include ActionView::Helpers::TagHelper
 
+    def initialize(tag)
+      @tag = tag
+    end
+    
+    def page_link(page, text, attributes = {})
+      attributes = tag_options(attributes)
+      @paginate_comments_url_route = @paginate_comments_url_route.blank? ? CommentsExtension::UrlCache : @paginate_comments_url_route
+      %Q{<a href="#{@tag.locals.page.url}#{@paginate_comments_url_route}#{page}"#{attributes}>#{text}</a>}
+    end
+    
+    def gap_marker
+      '<span class="gap">&#8230;</span>'
+    end
+
+    def page_span(page, text, attributes = {})
+      attributes = tag_options(attributes)
+      "<span#{attributes}>#{text}</span>"
+    end
+  end
+  
+  class TagError < StandardError; end
+  
   desc "Provides tags and behaviors to support comments in Radiant."
 
   desc %{
@@ -50,17 +76,22 @@ module CommentTags
   desc %{
     Gives access to comment-related tags
   }
+
   tag "comments" do |tag|
-    comments = tag.locals.page.comments.approved
+    options = find_pagination_options(tag)    
+    tag.locals.paginated_comments = tag.locals.page.comments.approved.paginate(options)
+    
     tag.expand
   end
 
   desc %{
     Cycles through each comment and renders the enclosed tags for each.
+    Use :per_page for setting comments per page option
   }
   tag "comments:each" do |tag|
     page = tag.locals.page
-    comments = page.comments.approved.to_a
+
+    comments = tag.locals.paginated_comments.to_a
     comments << page.selected_comment if page.selected_comment && page.selected_comment.unapproved?
     result = []
     comments.each_with_index do |comment, index|
@@ -69,6 +100,45 @@ module CommentTags
       result << tag.expand
     end
     result
+  end
+
+
+  desc %{
+    Renders pagination links with will_paginate
+    The following optional attributes may be controlled:
+    
+    * id - the id to apply to the containing @<div>@
+    * class - the class to apply to the containing @<div>@
+    * previous_label - default: "« Previous"
+    * prev_label - deprecated variant of previous_label
+    * next_label - default: "Next »"
+    * inner_window - how many links are shown around the current page (default: 4)
+    * outer_window - how many links are around the first and the last page (default: 1)
+    * separator - string separator for page HTML elements (default: single space)
+    * page_links - when false, only previous/next links are rendered (default: true)
+    * container - when false, pagination links are not wrapped in a containing @<div>@ (default: true)
+    
+    *Usage:*
+    
+    <pre><code><r:comments>
+      <r:pages [id=""] [class="pagination"] [previous_label="&laquo; Previous"]
+      [next_label="Next &raquo;"] [inner_window="4"] [outer_window="1"]
+      [separator=" "] [page_links="true"] [container="true"]/>
+    </r:pages></r:comments>
+    </code></pre>
+  }
+  tag 'comments:pagination_links' do |tag|
+    renderer = RadiantLinkRenderer.new(tag)
+    
+    options = {}
+    
+    [:id, :class, :previous_label, :prev_label, :next_label, :inner_window, :outer_window, :separator].each do |a|
+      options[a] = tag.attr[a.to_s] unless tag.attr[a.to_s].blank?
+    end
+    options[:page_links] = false if 'false' == tag.attr['page_links']
+    options[:container]  = false if 'false' == tag.attr['container']
+
+    will_paginate tag.locals.paginated_comments, options.merge(:renderer => renderer)
   end
 
   desc %{
@@ -334,5 +404,35 @@ module CommentTags
   tag "unless_comments_simple_spam_filter_enabled" do |tag|
     tag.expand unless Comment.simple_spam_filter_enabled?
   end
+  
+  private
+  
+  def find_pagination_options(tag)    
+    options = {}
 
+    options[:page] = tag.attr['page'] || @request.path[/^#{Regexp.quote(tag.locals.page.url)}#{Regexp.quote(CommentsExtension::UrlCache)}(\d+)\/?$/, 1]
+
+    options[:per_page] = tag.attr['per_page'] || CommentsExtension::ShowPerPage
+    raise TagError.new('the per_page attribute of the comments tag must be a positive integer') unless options[:per_page].to_i > 0
+    
+    by = (tag.attr[:by] || 'created_at').strip
+    order = (tag.attr[:order] || 'desc').strip 
+    order_string = ''
+    
+    if Comment.new.attributes.keys.include?(by)
+      order_string << by
+    else
+      raise TagError.new('the by attribute of the comments tag must specify a valid field name')
+    end
+
+    if order =~ /^(a|de)sc$/i
+      order_string << " #{order.upcase}"
+    else
+      raise TagError.new('the order attribute of the comments tag must be either "asc" or "desc"')
+    end
+    options[:order] = order_string
+
+    options
+  end
+  
 end

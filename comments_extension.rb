@@ -30,7 +30,17 @@ class CommentsExtension < Radiant::Extension
     Page.class_eval do
       include CommentPageExtensions
       include CommentTags
+      include ActionView::Helpers::TagHelper # for pagination
     end
+
+   # pagination hack
+    if Radiant::Config.table_exists?
+         Radiant::Config['comments.url_route'] = '' unless Radiant::Config['comments.url_route']
+         Radiant::Config['comments.show_per_page'] = 10 unless Radiant::Config['comments.show_per_page']
+         CommentsExtension.const_set('UrlCache', Radiant::Config['comments.url_route'])
+         CommentsExtension.const_set('ShowPerPage', Radiant::Config['comments.show_per_page'])
+    end
+
 
     if admin.respond_to? :page
       admin.page.edit.add :parts_bottom, "edit_comments_enabled", :before => "edit_timestamp"
