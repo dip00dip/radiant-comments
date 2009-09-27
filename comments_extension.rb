@@ -30,10 +30,13 @@ class CommentsExtension < Radiant::Extension
     Page.class_eval do
       include CommentPageExtensions
       include CommentTags
+      #  pagination requirement
       include ActionView::Helpers::TagHelper # for pagination
+      
     end
 
    # pagination hack
+
     if Radiant::Config.table_exists?
          Radiant::Config['comments.url_route'] = '' unless Radiant::Config['comments.url_route']
          Radiant::Config['comments.show_per_page'] = 10 unless Radiant::Config['comments.show_per_page']
